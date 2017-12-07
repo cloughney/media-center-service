@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace MediaCenterService.Power.Controllers
 {
-	[Route("power")]
+	[Route("power"), Produces("application/json")]
     public class PowerController : Controller
     {
 		private readonly IPowerStateManager powerStateManager;
@@ -23,8 +23,11 @@ namespace MediaCenterService.Power.Controllers
 				return this.BadRequest();
 			}
 
+			var delayMilliseconds = (request.DelaySeconds ?? 5) * 1000;
+			delayMilliseconds = delayMilliseconds > 0 ? delayMilliseconds : 0;
+
 			Task.Run(() => {
-				Thread.Sleep((request.DelaySeconds ?? 5) * 1000);
+				Thread.Sleep(delayMilliseconds);
 				this.powerStateManager.SetState(request.State);
 			});
 

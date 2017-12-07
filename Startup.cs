@@ -1,4 +1,5 @@
-﻿using MediaCenterService.Power;
+﻿using MediaCenterService.Applications;
+using MediaCenterService.Power;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -17,6 +18,7 @@ namespace MediaCenterService
 		
         public void ConfigureServices(IServiceCollection services)
         {
+			services.AddSingleton<IApplicationManager, ApplicationManager>();
 			services.AddSingleton<IPowerStateManager, PowerStateManager>();
             services.AddMvc();
         }
