@@ -19,7 +19,7 @@ namespace MediaCenterService.Applications
 	}
 
 	public class ApplicationManager : IApplicationManager
-    {
+	{
 		[DllImport("user32.dll")]
 		[return: MarshalAs(UnmanagedType.Bool)]
 		private static extern bool EnumWindows(WindowEnumCallback lpEnumFunc, int lParam);
@@ -27,17 +27,28 @@ namespace MediaCenterService.Applications
 		[DllImport("user32.dll")]
 		private static extern bool IsWindowVisible(int h);
 
+		[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+		private static extern int GetWindowTextLength(IntPtr hWnd);
+
 		[DllImport("user32.dll", SetLastError = true)]
 		private static extern IntPtr SetActiveWindow(IntPtr hWnd);
 
-		[DllImport("kernel32.dll")]
-		private static extern uint GetCurrentThreadId();
+		[DllImport("user32.dll")]
+		private static extern bool SetForegroundWindow(IntPtr hWnd);
 
 		[DllImport("user32.dll")]
-		private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
-		
+		private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+		[DllImport("user32.dll")]
+		private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint ProcessId);
+
 		[DllImport("user32.dll")]
 		private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+		private static readonly int SW_MAXIMIZE = 3;
+
+		[DllImport("kernel32.dll")]
+		private static extern uint GetCurrentThreadId();
 
 		private delegate bool WindowEnumCallback(int hwnd, int lparam);
 
@@ -47,7 +58,9 @@ namespace MediaCenterService.Applications
 		{
 			this.applicationsByMoniker = new Dictionary<String, Application>
 			{
-				{ "chrome", new Application { ProcessName = @"chrome" } }
+				{ "chrome", new Application { ProcessName = @"chrome" } },
+				{ "browser", new Application { ProcessName = @"chrome" } },
+				{ "kodi", new Application { ProcessName = @"kodi" } }
 			};
 		}
 
@@ -63,31 +76,48 @@ namespace MediaCenterService.Applications
 
 		public Application Switch(string moniker, object options)
 		{
-			Application application;
-			if (!this.applicationsByMoniker.TryGetValue(moniker, out application))
+			if (!this.applicationsByMoniker.TryGetValue(moniker, out Application application))
 			{
 				return null;
 			}
 
 			var windowHandles = this.GetVisibleWindows();
-			var appProcess = Process.GetProcesses()
-				.Where(x => windowHandles.Contains(x.Handle))
-				.SingleOrDefault(x => String.Equals(application.ProcessName, x.ProcessName, StringComparison.OrdinalIgnoreCase));
+
+			uint appThreadId = 0;
+			var appWindowHandle = IntPtr.Zero;
+
+			foreach (var hWnd in windowHandles)
+			{
+				appThreadId = GetWindowThreadProcessId(hWnd, out uint processId);
+				var process = Process.GetProcessById((int)processId); // hrm
+				
+				if (String.Equals(process.ProcessName, application.ProcessName, StringComparison.OrdinalIgnoreCase))
+				{
+					appWindowHandle = hWnd;
+					break;
+				}
+			}
+
+			if (appThreadId == 0)
+			{
+				return null;
+			}
 
 			var currentThreadId = GetCurrentThreadId();
-			var otherThreadId = GetWindowThreadProcessId(appProcess.Handle, new IntPtr(appProcess.Id));
-			var isCrossThread = currentThreadId != otherThreadId;
+			var isCrossThread = currentThreadId != appThreadId;
 
 			if (isCrossThread)
 			{
-				AttachThreadInput(currentThreadId, otherThreadId, true);
+				AttachThreadInput(currentThreadId, appThreadId, true);
 			}
-			
-			SetActiveWindow(appProcess.Handle);
 
-			if (currentThreadId != otherThreadId)
+			ShowWindowAsync(appWindowHandle, SW_MAXIMIZE);
+			SetForegroundWindow(appWindowHandle);
+			SetActiveWindow(appWindowHandle);
+
+			if (currentThreadId != appThreadId)
 			{
-				AttachThreadInput(currentThreadId, otherThreadId, false);
+				AttachThreadInput(currentThreadId, appThreadId, false);
 			}
 
 			return null;
@@ -98,9 +128,11 @@ namespace MediaCenterService.Applications
 			var windowHandles = new List<IntPtr>();
 			EnumWindows(new WindowEnumCallback((hWnd, lParam) =>
 			{
-				if (IsWindowVisible(hWnd))
+				var hWndPtr = new IntPtr(hWnd);
+				var titleLength = GetWindowTextLength(hWndPtr);
+				if (titleLength > 0 && IsWindowVisible(hWnd))
 				{
-					windowHandles.Add(new IntPtr(hWnd));
+					windowHandles.Add(hWndPtr);
 				}
 
 				return true;
