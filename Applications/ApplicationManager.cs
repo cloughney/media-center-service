@@ -71,7 +71,20 @@ namespace MediaCenterService.Applications
 
 		public Application Stop(string moniker, object options)
 		{
-			throw new NotImplementedException();
+			if (!this.applicationsByMoniker.TryGetValue(moniker, out Application application))
+			{
+				return null;
+			}
+
+			var appProcess = this.GetApplicationProcess(application);
+			if (appProcess == null)
+			{
+				return null;
+			}
+
+			appProcess.Process.CloseMainWindow();
+
+			return application;
 		}
 
 		public Application Switch(string moniker, object options)
@@ -81,43 +94,27 @@ namespace MediaCenterService.Applications
 				return null;
 			}
 
-			var windowHandles = this.GetVisibleWindows();
-
-			uint appThreadId = 0;
-			var appWindowHandle = IntPtr.Zero;
-
-			foreach (var hWnd in windowHandles)
-			{
-				appThreadId = GetWindowThreadProcessId(hWnd, out uint processId);
-				var process = Process.GetProcessById((int)processId); // hrm
-				
-				if (String.Equals(process.ProcessName, application.ProcessName, StringComparison.OrdinalIgnoreCase))
-				{
-					appWindowHandle = hWnd;
-					break;
-				}
-			}
-
-			if (appThreadId == 0)
+			var appProcess = this.GetApplicationProcess(application);
+			if (appProcess == null)
 			{
 				return null;
 			}
 
 			var currentThreadId = GetCurrentThreadId();
-			var isCrossThread = currentThreadId != appThreadId;
+			var isCrossThread = currentThreadId != appProcess.ThreadId;
 
 			if (isCrossThread)
 			{
-				AttachThreadInput(currentThreadId, appThreadId, true);
+				AttachThreadInput(currentThreadId, appProcess.ThreadId, true);
 			}
 
-			ShowWindowAsync(appWindowHandle, SW_MAXIMIZE);
-			SetForegroundWindow(appWindowHandle);
-			SetActiveWindow(appWindowHandle);
+			ShowWindowAsync(appProcess.Process.Handle, SW_MAXIMIZE);
+			SetForegroundWindow(appProcess.Process.Handle);
+			SetActiveWindow(appProcess.Process.Handle);
 
-			if (currentThreadId != appThreadId)
+			if (currentThreadId != appProcess.ThreadId)
 			{
-				AttachThreadInput(currentThreadId, appThreadId, false);
+				AttachThreadInput(currentThreadId, appProcess.ThreadId, false);
 			}
 
 			return null;
@@ -140,10 +137,47 @@ namespace MediaCenterService.Applications
 
 			return windowHandles;
 		}
+
+		private WindowProcess GetApplicationProcess(Application application)
+		{
+			var windowHandles = this.GetVisibleWindows();
+
+			Process process = null;
+			uint threadId = 0;
+
+			foreach (var hWnd in windowHandles)
+			{
+				threadId = GetWindowThreadProcessId(hWnd, out uint processId);
+				process = Process.GetProcessById((int)processId); // hrm
+
+				if (String.Equals(process.ProcessName, application.ProcessName, StringComparison.OrdinalIgnoreCase))
+				{
+					break;
+				}
+			}
+
+			if (threadId == 0 || process == null)
+			{
+				return null;
+			}
+
+			return new WindowProcess
+			{
+				Process = process,
+				ThreadId = threadId
+			};
+		}
 	}
 
 	public class Application
 	{
 		public String ProcessName { get; set; }
+	}
+
+	public class WindowProcess
+	{
+		public Process Process { get; set; }
+
+		public uint ThreadId { get; set; }
 	}
 }
